@@ -15,8 +15,7 @@ options:
 	@echo "CC       = ${CC}"
 
 .c.o:
-	@echo CC $<
-	@${CC} -c ${CFLAGS} $<
+	${CC} -c ${CFLAGS} $<
 
 ${OBJ}: config.h config.mk arg.h util.h
 
@@ -25,8 +24,7 @@ config.h:
 	@cp config.def.h $@
 
 slock: ${OBJ}
-	@echo CC -o $@
-	@${CC} -o $@ ${OBJ} ${LDFLAGS}
+	${CC} -o $@ ${OBJ} ${LDFLAGS}
 
 clean:
 	@echo cleaning

@@ -18,6 +18,7 @@
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <Imlib2.h>
 
 #include "arg.h"
 #include "util.h"
@@ -35,6 +36,7 @@ struct lock {
 	int screen;
 	Window root, win;
 	Pixmap pmap;
+	Pixmap bgmap;
 	unsigned long colors[NUMCOLS];
 };
 
@@ -45,6 +47,8 @@ struct xrandr {
 };
 
 #include "config.h"
+
+Imlib_Image background;
 
 static void
 die(const char *errstr, ...)
@@ -191,9 +195,10 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 			color = len ? INPUT : ((failure || failonclear) ? FAILED : INIT);
 			if (running && oldc != color) {
 				for (screen = 0; screen < nscreens; screen++) {
-					XSetWindowBackground(dpy,
-					                     locks[screen]->win,
-					                     locks[screen]->colors[color]);
+					if(locks[screen]->bgmap)
+						XSetWindowBackgroundPixmap(dpy, locks[screen]->win, locks[screen]->bgmap);
+					else
+						XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[0]);
 					XClearWindow(dpy, locks[screen]->win);
 				}
 				oldc = color;
@@ -236,6 +241,16 @@ lockscreen(Display *dpy, struct xrandr *rr, int screen)
 	lock->screen = screen;
 	lock->root = RootWindow(dpy, lock->screen);
 
+	if (background) {
+		lock->bgmap = XCreatePixmap(dpy, lock->root, DisplayWidth(dpy, lock->screen), DisplayHeight(dpy, lock->screen), DefaultDepth(dpy, lock->screen));
+		imlib_context_set_image(background);
+		imlib_context_set_display(dpy);
+		imlib_context_set_visual(DefaultVisual(dpy, lock->screen));
+		imlib_context_set_colormap(DefaultColormap(dpy, lock->screen));
+		imlib_context_set_drawable(lock->bgmap);
+		imlib_render_image_on_drawable(0, 0);
+		imlib_free_image();
+	}
 	for (i = 0; i < NUMCOLS; i++) {
 		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen),
 		                 colorname[i], &color, &dummy);
@@ -252,6 +267,8 @@ lockscreen(Display *dpy, struct xrandr *rr, int screen)
 	                          CopyFromParent,
 	                          DefaultVisual(dpy, lock->screen),
 	                          CWOverrideRedirect | CWBackPixel, &wa);
+	if(lock->bgmap)
+		XSetWindowBackgroundPixmap(dpy, lock->win, lock->bgmap);
 	lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
 	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap,
 	                                &color, &color, 0, 0);
@@ -355,6 +372,48 @@ main(int argc, char **argv) {
 		die("slock: setgid: %s\n", strerror(errno));
 	if (setuid(duid) < 0)
 		die("slock: setuid: %s\n", strerror(errno));
+
+	/* screenshot */
+	Screen *scr = ScreenOfDisplay(dpy, DefaultScreen(dpy));
+	background = imlib_create_image(scr->width, scr->height);
+	imlib_context_set_image(background);
+	imlib_context_set_display(dpy);
+	imlib_context_set_visual(DefaultVisual(dpy, 0));
+	imlib_context_set_drawable(RootWindow(dpy, XScreenNumberOfScreen(scr)));
+	imlib_copy_drawable_to_image(0, 0, 0, scr->width, scr->height, 0, 0, 1);
+
+#ifdef BLUR
+	imlib_image_blur(blurradius);
+#endif
+
+#ifdef PIXELATION
+	int width = scr->width;
+	int height = scr->height;
+
+	for(int y = 0; y < height; y += pixelsize) {
+		for(int x = 0; x < width; x += pixelsize) {
+			int red = 0;
+			int green = 0;
+			int blue = 0;
+
+			Imlib_Color pixel = { 0 };
+
+			for(int j = 0; j < pixelsize && j < height; j++) {
+				for(int i = 0; i < pixelsize && i < width; i++) {
+					imlib_image_query_pixel(x+i, y+j, &pixel);
+					red += pixel.red;
+					green += pixel.green;
+					blue += pixel.blue;
+				}
+			}
+			red /= pixelsize * pixelsize;
+			green /= pixelsize * pixelsize;
+			blue /= pixelsize * pixelsize;
+			imlib_context_set_color(red, green, blue, pixel.alpha);
+			imlib_image_fill_rectangle(x, y, pixelsize, pixelsize);
+		}
+	}
+#endif
 
 	/* check for Xrandr support */
 	rr.active = XRRQueryExtension(dpy, &rr.evbase, &rr.errbase);

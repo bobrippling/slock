@@ -13,3 +13,8 @@ static const int failonclear = 1;
 
 /* allow control key to trigger fail on clear */
 static const int controlkeyclear = 0;
+
+#define BLUR
+static const int blurradius = 5;
+// #define PIXELATION
+// static const int pixelsize = 5;
